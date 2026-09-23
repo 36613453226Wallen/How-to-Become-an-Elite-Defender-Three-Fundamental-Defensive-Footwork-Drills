@@ -405,25 +405,6 @@ def append_digest_entry(doc: Document, entry: dict):
     run.add_picture(entry["qr_path"], width=Cm(3.6))
 
     extras = entry.get("extras") or {}
-    if extras.get("comment_image"):
-        p = cell.add_paragraph()
-        run = p.add_run("评论区附图（图一）")
-        set_run_font(run, 9, bold=True, color=ACCENT)
-        p = cell.add_paragraph()
-        p.paragraph_format.space_after = Pt(6)
-        run = p.add_run()
-        run.add_picture(extras["comment_image"], width=Cm(15.2))
-        if extras.get("related_title"):
-            p = cell.add_paragraph()
-            run = p.add_run(extras["related_title"])
-            set_run_font(run, 10, bold=True, color=NAVY)
-            p = cell.add_paragraph()
-            run = p.add_run("延伸视频二维码")
-            set_run_font(run, 9, color=MUTED)
-            p = cell.add_paragraph()
-            p.paragraph_format.space_after = Pt(8)
-            run = p.add_run()
-            run.add_picture(extras["related_qr"], width=Cm(3.2))
 
     inner = cell.add_table(rows=2, cols=2)
     inner.autofit = True
@@ -452,6 +433,31 @@ def append_digest_entry(doc: Document, entry: dict):
             blank.paragraph_format.space_after = Pt(8)
             run = blank.add_run(" ")
             set_run_font(run, 11)
+
+    if extras.get("comment_image") or extras.get("related_title"):
+        p = cell.add_paragraph()
+        p.paragraph_format.space_before = Pt(10)
+        run = p.add_run("文后附图")
+        set_run_font(run, 9, bold=True, color=ACCENT)
+        if extras.get("related_title"):
+            p = cell.add_paragraph()
+            run = p.add_run(extras["related_title"])
+            set_run_font(run, 10, bold=True, color=NAVY)
+            p = cell.add_paragraph()
+            run = p.add_run("延伸视频二维码")
+            set_run_font(run, 9, color=MUTED)
+            p = cell.add_paragraph()
+            p.paragraph_format.space_after = Pt(6)
+            run = p.add_run()
+            run.add_picture(extras["related_qr"], width=Cm(3.2))
+        if extras.get("comment_image"):
+            p = cell.add_paragraph()
+            run = p.add_run("评论区截图（图一）")
+            set_run_font(run, 9, color=MUTED)
+            p = cell.add_paragraph()
+            p.paragraph_format.space_after = Pt(6)
+            run = p.add_run()
+            run.add_picture(extras["comment_image"], width=Cm(15.2))
 
     spacer(doc, 14)
 

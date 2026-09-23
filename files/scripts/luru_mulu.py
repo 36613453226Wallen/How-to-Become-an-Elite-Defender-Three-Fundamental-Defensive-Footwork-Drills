@@ -31,6 +31,15 @@ MUTED = RGBColor(0x5C, 0x64, 0x73)
 FILL_HEAD = "1F2A44"
 FILL_SOFT = "F4F1EA"
 FILL_BOX = "FAFBFC"
+MAIN_QR_CM = 4.2
+DIGEST_QR_CM = 3.6
+REL_QR_CM = 2.4
+REL_IMG_CM = 2.4
+DIGEST_REMINDER = (
+    "综合目录中不放入a滑步b交叉步c双滑步的链接和二维码，但是需要这些中文字描述，"
+    "还有图二到图五的动作细节对应。图片高度（保持比例）和二维码一致，以便放在同一水平位置。"
+    "（比如图二三、图三四五分别一组）。"
+)
 
 
 def set_run_font(run, size=11, bold=False, color=None, font=FONT):
@@ -254,6 +263,34 @@ def generate_qr(url: str, dest: Path) -> Path:
     return dest
 
 
+def add_aligned_media_row(host, items: list[dict], height_cm: float = REL_IMG_CM):
+    """Place QR/images in one row at the same height, captions underneath."""
+    if not items:
+        return None
+    table = host.add_table(rows=2, cols=len(items))
+    table.autofit = True
+    for i, item in enumerate(items):
+        img_cell = table.cell(0, i)
+        cap_cell = table.cell(1, i)
+        set_cell_shading(img_cell, "FFFFFF")
+        set_cell_shading(cap_cell, "FFFFFF")
+        set_cell_borders(img_cell, "E8E8E8", "4")
+        set_cell_borders(cap_cell, "E8E8E8", "4")
+        set_cell_margins(img_cell, 40, 40, 50, 50)
+        set_cell_margins(cap_cell, 20, 20, 50, 50)
+        p = img_cell.paragraphs[0]
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        p.paragraph_format.space_before = Pt(0)
+        p.paragraph_format.space_after = Pt(0)
+        run = p.add_run()
+        run.add_picture(item["path"], height=Cm(height_cm))
+        cp = cap_cell.paragraphs[0]
+        cp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = cp.add_run(item.get("caption", ""))
+        set_run_font(run, 8, color=MUTED)
+    return table
+
+
 def load_catalog() -> list[dict]:
     if CATALOG.exists():
         return json.loads(CATALOG.read_text(encoding="utf-8"))
@@ -297,11 +334,12 @@ def write_single_doc(entry: dict, dest: Path):
 
     add_heading_bar(doc, "二维码")
     add_text(doc, "手机扫码打开本视频：", size=10, color=MUTED, after=4)
-    doc.add_picture(entry["qr_path"], width=Cm(4.2))
+    doc.add_picture(entry["qr_path"], width=Cm(MAIN_QR_CM))
     spacer(doc, 10)
 
     add_heading_bar(doc, "页面截图")
-    add_text(doc, "以下为用户提供的视频页标题截图，已原样嵌入。", size=10, color=MUTED, after=6)
+    shot_note = "以下为用户提供的视频页界面图（图一），已原样嵌入。" if entry.get("interface_shot") else "以下为用户提供的视频页标题截图，已原样嵌入。"
+    add_text(doc, shot_note, size=10, color=MUTED, after=6)
     doc.add_picture(entry["screenshot_path"], width=Cm(17.2))
     spacer(doc, 10)
 
@@ -326,7 +364,7 @@ def write_single_doc(entry: dict, dest: Path):
             add_text(doc, extras["related_title"], size=14, bold=True, color=NAVY, after=4)
             add_label_value(doc, "延伸视频链接", extras["related_url"], url=extras["related_url"])
             add_text(doc, "扫码打开延伸视频：", size=10, color=MUTED, after=4)
-            doc.add_picture(extras["related_qr"], width=Cm(4.0))
+            doc.add_picture(extras["related_qr"], width=Cm(REL_QR_CM))
             spacer(doc, 8)
         if extras.get("comment_image"):
             add_text(doc, "评论区截图（图一，按页宽排版）", size=10, bold=True, color=ACCENT, after=4)
@@ -349,6 +387,12 @@ def write_single_doc(entry: dict, dest: Path):
                     run = p.add_run(item)
                     set_run_font(run, 10, color=NAVY)
 
+    write_single_relations(doc, entry.get("relations") or [])
+
+    if entry.get("end_reminder"):
+        add_heading_bar(doc, "提示词")
+        add_text(doc, entry["end_reminder"], size=10, color=MUTED, after=8)
+
     add_text(
         doc,
         "说明：本文件用于单视频对照（页面、链接、二维码）。动作拆解不在此份；综合评论与细节关注见《综合拓展 / 视频综合目录》。",
@@ -359,12 +403,38 @@ def write_single_doc(entry: dict, dest: Path):
     doc.save(dest)
 
 
+def write_single_relations(doc: Document, relations: list[dict]):
+    if not relations:
+        return
+    add_heading_bar(doc, "视频间联系")
+    add_text(doc, "精准空降链接配略小二维码；动作图与该二维码同高，排在同一水平。", size=9, color=MUTED, after=8)
+    for rel in relations:
+        add_text(doc, rel["name"], size=13, bold=True, color=NAVY, after=4)
+        add_text(doc, rel["description"], size=11, after=6)
+        if rel.get("link_title"):
+            add_text(doc, rel["link_title"], size=10, bold=True, color=NAVY, after=2)
+        if rel.get("url"):
+            add_label_value(doc, "精准空降链接", rel["url"], url=rel["url"])
+        row = []
+        if rel.get("qr_path"):
+            row.append({"path": rel["qr_path"], "caption": "精准二维码"})
+        for img in rel.get("images") or []:
+            row.append({"path": img["path"], "caption": img["label"]})
+        if row:
+            add_aligned_media_row(doc, row, height_cm=REL_IMG_CM)
+            spacer(doc, 10)
+        for extra in rel.get("extra_images") or []:
+            add_text(doc, extra["label"], size=10, bold=True, color=ACCENT, after=4)
+            doc.add_picture(extra["path"], width=Cm(8.0))
+            spacer(doc, 8)
+
+
 def new_digest_doc() -> Document:
     doc = setup_document("综合拓展  ·  视频综合目录")
     add_heading_bar(doc, "视频综合目录")
     add_text(
         doc,
-        "拓展用累计目录。每条按 1. 2. 3. 编号，只保留标题、二维码，并留出「评论空间」「细节关注」两栏。",
+        "拓展用累计目录。每条按 1. 2. 3. 编号，保留标题、本视频二维码，并留出「评论空间」「细节关注」两栏。视频间联系只写中文和动作图。",
         size=11,
         color=NAVY,
         after=4,
@@ -402,7 +472,7 @@ def append_digest_entry(doc: Document, entry: dict):
     p = cell.add_paragraph()
     p.paragraph_format.space_after = Pt(8)
     run = p.add_run()
-    run.add_picture(entry["qr_path"], width=Cm(3.6))
+    run.add_picture(entry["qr_path"], width=Cm(DIGEST_QR_CM))
 
     extras = entry.get("extras") or {}
 
@@ -449,7 +519,7 @@ def append_digest_entry(doc: Document, entry: dict):
             p = cell.add_paragraph()
             p.paragraph_format.space_after = Pt(6)
             run = p.add_run()
-            run.add_picture(extras["related_qr"], width=Cm(3.2))
+            run.add_picture(extras["related_qr"], width=Cm(REL_QR_CM))
         if extras.get("comment_image"):
             p = cell.add_paragraph()
             run = p.add_run("评论区截图（图一）")
@@ -459,7 +529,51 @@ def append_digest_entry(doc: Document, entry: dict):
             run = p.add_run()
             run.add_picture(extras["comment_image"], width=Cm(15.2))
 
+    write_digest_relations(cell, entry.get("relations") or [])
     spacer(doc, 14)
+
+
+def write_digest_relations(cell, relations: list[dict]):
+    if not relations:
+        return
+    p = cell.add_paragraph()
+    p.paragraph_format.space_before = Pt(10)
+    run = p.add_run("视频间联系")
+    set_run_font(run, 11, bold=True, color=ACCENT)
+    p = cell.add_paragraph()
+    run = p.add_run("只写中文描述和动作图，不放 a滑步 / b交叉步 / c连续滑步 的链接与二维码。图与本条视频二维码同高。")
+    set_run_font(run, 9, color=MUTED)
+
+    for rel in relations:
+        p = cell.add_paragraph()
+        p.paragraph_format.space_before = Pt(6)
+        run = p.add_run(rel["name"])
+        set_run_font(run, 11, bold=True, color=NAVY)
+        p = cell.add_paragraph()
+        run = p.add_run(rel["description"])
+        set_run_font(run, 10, color=NAVY)
+
+    groups = []
+    seen = set()
+    for rel in relations:
+        for img in rel.get("digest_images") or rel.get("images") or []:
+            key = img.get("path")
+            if key and key not in seen:
+                seen.add(key)
+                groups.append(img)
+    # 图二三一组，图四五一组（图三四五按图四+图五）
+    pair_a = [img for img in groups if img.get("label") in {"图二", "图三"}]
+    pair_b = [img for img in groups if img.get("label") in {"图四", "图五", "图五侧面"}]
+    if pair_a:
+        p = cell.add_paragraph()
+        run = p.add_run("图二三一组")
+        set_run_font(run, 9, bold=True, color=ACCENT)
+        add_aligned_media_row(cell, [{"path": i["path"], "caption": i["label"]} for i in pair_a], height_cm=DIGEST_QR_CM)
+    if pair_b:
+        p = cell.add_paragraph()
+        run = p.add_run("图四五一组")
+        set_run_font(run, 9, bold=True, color=ACCENT)
+        add_aligned_media_row(cell, [{"path": i["path"], "caption": i["label"]} for i in pair_b], height_cm=DIGEST_QR_CM)
 
 
 def write_digest(entries: list[dict]):
@@ -488,22 +602,51 @@ def materialize_entry(entry: dict) -> dict:
     shutil.copy2(qr_path, digest_qr)
 
     extras = dict(entry.get("extras") or {})
+    file_i = 4
     if extras.get("comment_src"):
-        comment_dest = video_dir / "04_评论区.png"
+        comment_dest = video_dir / f"{file_i:02d}_评论区.png"
         shutil.copy2(extras["comment_src"], comment_dest)
         extras["comment_image"] = str(comment_dest)
+        file_i += 1
     if extras.get("related_url"):
-        related_qr = video_dir / f"05_延伸_{extras.get('related_bvid', 'video')}_二维码.png"
+        related_qr = video_dir / f"{file_i:02d}_延伸_{extras.get('related_bvid', 'video')}_二维码.png"
         generate_qr(extras["related_canonical"], related_qr)
         extras["related_qr"] = str(related_qr)
+        file_i += 1
+
+    relations = []
+    for rel in entry.get("relations") or []:
+        rel = dict(rel)
+        if rel.get("url"):
+            q = video_dir / f"{file_i:02d}_{rel['code']}_精准二维码.png"
+            generate_qr(rel["url"], q)
+            rel["qr_path"] = str(q)
+            file_i += 1
+        copied = []
+        for img in rel.get("images") or []:
+            dest = video_dir / f"{file_i:02d}_{img['label']}.png"
+            shutil.copy2(img["src"], dest)
+            copied.append({"label": img["label"], "path": str(dest)})
+            file_i += 1
+        rel["images"] = copied
+        extra_copied = []
+        for img in rel.get("extra_images") or []:
+            dest = video_dir / f"{file_i:02d}_{img['label']}.png"
+            shutil.copy2(img["src"], dest)
+            extra_copied.append({"label": img["label"], "path": str(dest)})
+            file_i += 1
+        rel["extra_images"] = extra_copied
+        relations.append(rel)
 
     entry = dict(entry)
     entry["qr_path"] = str(qr_path)
     entry["screenshot_path"] = str(shot_dest)
     entry["extras"] = extras
+    entry["relations"] = relations
     entry["folder"] = str(video_dir)
 
-    single_doc = video_dir / "01_收录.docx"
+    short = entry.get("file_title") or entry["short_title"]
+    single_doc = video_dir / f"01_{short}.docx"
     write_single_doc(entry, single_doc)
     entry["single_doc"] = str(single_doc)
     return entry
@@ -658,6 +801,7 @@ def catalog_entries() -> list[dict]:
             "index": 1,
             "bvid": "BV1L54y1b7Wu",
             "short_title": "如何成为精英防守者",
+            "file_title": "精英防守者",
             "title": "如何成为精英防守者？3个基础防守脚步训练 让你锁住持球人！【宝石碎片 GemPieces Vol.56】",
             "url": (
                 "https://www.bilibili.com/video/BV1L54y1b7Wu/"
@@ -709,6 +853,7 @@ def catalog_entries() -> list[dict]:
             "index": 2,
             "bvid": "BV11U4y1b7EV",
             "short_title": "如何才能打造铁血防守",
+            "file_title": "铁血防守",
             "title": kbt_title,
             "url": kbt_url,
             "canonical_url": "https://www.bilibili.com/video/BV11U4y1b7EV/",
@@ -726,6 +871,120 @@ def catalog_entries() -> list[dict]:
             ],
             "description": "图三为视频播放页。标题完整可见；画面正在做大幅度转髋跳。",
             "title_note": "图三标题完整，按截图录入。",
+        },
+        {
+            "index": 3,
+            "bvid": "BV1oM411y7Bm",
+            "short_title": "快速离心",
+            "file_title": "快速离心",
+            "interface_shot": True,
+            "title": (
+                "被忽视的“快速离心”能力？真正解锁你的运球重心！一套30分钟下肢综合训练计划 "
+                "涵盖下肢灵活度/基础肌力/快速离心【宝石碎片 GemPieces Vol.108】"
+            ),
+            "url": "https://www.bilibili.com/video/BV1oM411y7Bm/?spm_id_from=333.1391.0.0",
+            "canonical_url": "https://www.bilibili.com/video/BV1oM411y7Bm/",
+            "screenshot_src": str(ASSETS / "9cecc1f5-d77f-4eb2-8918-58d813274842.png"),
+            "screenshot_fields": [
+                ["UP主", "隐藏宝石HiddenGems"],
+                ["关注数（截图）", "58.3万"],
+                ["播放量（截图）", "16.6万"],
+                ["弹幕（截图）", "301"],
+                ["发布时间（截图）", "2023-01-04 18:00:00"],
+                ["版权提示（截图）", "未经作者授权，禁止转载"],
+                ["点赞 / 投币 / 收藏 / 转发（截图）", "8519  /  4244  /  1.2万  /  10668"],
+                ["画面提示（图一）", "其中分为3个模块；绿色折线标在髋部"],
+                ["BV号", "BV1oM411y7Bm"],
+            ],
+            "description": (
+                "Hey收集者。首先感谢大家22年对频道的支持与陪伴，祝大家2023年一切顺利，一起继续前行。"
+                "收到大家对上一期运球重心视频的支持后，这期带来相应的下肢综合训练计划。"
+                "围绕下肢关节灵活度、基础肌力与快速离心安排动作，不需要铃也可以完成。"
+            ),
+            "title_note": "标题由用户完整给出，图一界面图一并录入。",
+            "end_reminder": DIGEST_REMINDER,
+            "relations": [
+                {
+                    "code": "a滑步",
+                    "name": "a滑步",
+                    "description": (
+                        "Vol.108 应结合 Vol.113 的 a滑步。"
+                        "精准空降 Vol.113 的 02:55，是快速离心的后置动作（图二：#4 快速离心降+横移）。"
+                    ),
+                    "link_title": (
+                        "【拿出每天1%的时间 全面提升你的防守移动能力！15分钟防守专项跟练视频 "
+                        "防守脚步/移动能力/体能心肺【宝石碎片 GemPieces Vol.113】】【精准空降到 02:55】"
+                    ),
+                    "url": (
+                        "https://www.bilibili.com/video/BV1Sh411G746/"
+                        "?share_source=copy_web&vd_source=731103ad1d48157617bc27e0f3b87025&t=175"
+                    ),
+                    "images": [
+                        {
+                            "label": "图二",
+                            "src": str(ASSETS / "3e16db49-238b-4f5f-8e21-3b71aca8040c.png"),
+                        }
+                    ],
+                },
+                {
+                    "code": "b交叉步",
+                    "name": "b交叉步",
+                    "description": (
+                        "Vol.108 应结合 Vol.113 的 b交叉步。"
+                        "精准空降 Vol.113 的 03:56，是图二「快速离心+横移」的后置动作，中间有罚篮休息（图三：#5 快速离心降+横移交叉步）。"
+                    ),
+                    "link_title": (
+                        "【拿出每天1%的时间 全面提升你的防守移动能力！15分钟防守专项跟练视频 "
+                        "防守脚步/移动能力/体能心肺【宝石碎片 GemPieces Vol.113】】【精准空降到 03:56】"
+                    ),
+                    "url": (
+                        "https://www.bilibili.com/video/BV1Sh411G746/"
+                        "?share_source=copy_web&vd_source=731103ad1d48157617bc27e0f3b87025&t=236"
+                    ),
+                    "images": [
+                        {
+                            "label": "图三",
+                            "src": str(ASSETS / "cf0a099c-0bb8-44fe-a535-21ccaef0c023.png"),
+                        }
+                    ],
+                },
+                {
+                    "code": "c连续滑步",
+                    "name": "c连续滑步",
+                    "description": (
+                        "c连续滑步跟在 Vol.113 的 a滑步后面。"
+                        "动作细节见图四、图五（两次转髋 hip turn 后的防守滑步）；图六是封面图。"
+                    ),
+                    "link_title": (
+                        "【如何成为精英防守者？3个基础防守脚步训练 让你锁住持球人！"
+                        "【宝石碎片 GemPieces Vol.56】】【精准空降到 01:22】"
+                    ),
+                    "url": (
+                        "https://www.bilibili.com/video/BV1L54y1b7Wu/"
+                        "?share_source=copy_web&vd_source=731103ad1d48157617bc27e0f3b87025&t=82"
+                    ),
+                    "images": [
+                        {
+                            "label": "图四",
+                            "src": str(ASSETS / "a64a6358-cfe8-455b-a64f-f4b41e62ee77.png"),
+                        },
+                        {
+                            "label": "图五",
+                            "src": str(ASSETS / "dee92f59-3541-46e8-b936-0be7376346af.png"),
+                        },
+                        {
+                            "label": "图五侧面",
+                            "src": str(ASSETS / "f1d2d78c-25fd-4059-8720-7e70a53cb94b.png"),
+                        },
+                    ],
+                    "extra_images": [
+                        {
+                            "label": "图六封面",
+                            "src": str(ASSETS / "0cd3be50-3615-4aac-96de-c1fe17ecb228.png"),
+                        }
+                    ],
+                },
+            ],
         },
     ]
 
